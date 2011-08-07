@@ -251,24 +251,23 @@ sub _decode_meta
 }
 
 # transfer dists/modules from 02packages.details.txt to the db.
+# returns 0 to ignore that dist from now on
+# returns 1 if everything is ok
 sub insertpkg
 {
     my ($db, $mod, $ver, $path) = @_;
 
-    my $rel   = _splitrel($path) or return;
+    my $rel   = _splitrel($path) or return 0;
     my $relid = $db->insrel($rel);
     $db->insrelmod($relid, $mod, $ver);
 
-    return;
+    return 1;
 }
 
-my %seen;
 my %lastreqs = map { ("${_}_req" => 0) } qw/run test build cfg/;
 sub insertdeps
 {
     my ($db, $metadir, $relpath) = @_;
-
-    return if $seen{$relpath}++;
 
     my $rel = _splitrel($relpath) or return;
     my $cpath = $rel->{'metapath'};
@@ -306,6 +305,51 @@ use Fcntl qw(SEEK_SET);
 
 my $SCHEMAFILE = 'metadeps.sql';
 
+sub _rewind
+{
+    my ($pkgsfh) = @_;
+    seek $pkgsfh, 0, SEEK_SET or die "seek: $!";
+    { redo until <$pkgsfh> eq "\n" }
+    return;
+}
+
+sub _poppkgs
+{
+    my ($fh, $db, $blacklist) = @_;
+
+    _rewind($fh);
+PKG_LOOP:
+    while (<$fh>) {
+        chomp;
+        my ($mod, $ver, $relpath) = split;
+        next PKG_LOOP if exists $blacklist->{$relpath};
+        $blacklist->{$relpath} = undef # undef saves on storage space
+            unless MetaDeps::insertpkg($db, $mod, $ver, $relpath);
+    }
+
+    return;
+}
+
+sub _popdeps
+{
+    my ($fh, $metadir, $db, $blacklist) = @_;
+
+    _rewind($fh);
+    my ($count, %seenpath);
+    while (<$fh>) {
+        chomp;
+        my (undef, undef, $relpath) = split;
+        unless (exists $blacklist->{$relpath} || $seenpath{$relpath}++) {
+            MetaDeps::insertdeps($db, $metadir, $relpath);
+        }
+
+        # commit every 500 packages
+        if (++$count % 500 == 0) { $db->commit; $db->begin }
+    }
+
+    return;
+}
+
 sub createdb
 {
     my ($pkgspath, $metadir, $destpath) = @_;
@@ -323,15 +367,11 @@ sub createdb
     my $dbh = DBI->connect("dbi:SQLite:$destpath")
         or die "error: $DBI::errstr";
     my $db = MetaDeps::DB->new($dbh);
-
-    open my $pkgsfh, '<', $pkgspath or die "open: $!";
-    { redo until <$pkgsfh> eq "\n" }
     $db->begin;
-    while (<$pkgsfh>) {
-        chomp;
-        my ($mod, $ver, $relpath) = split;
-        MetaDeps::insertpkg($db, $mod, $ver, $relpath);
-    }
+
+    my %blacklist;
+    open my $pkgsfh, '<', $pkgspath or die "open: $!";
+    _poppkgs($pkgsfh, $db, \%blacklist);
 
     # Create fake perl modules for each perl release.
     $db->fakeperlmods;
@@ -339,19 +379,9 @@ sub createdb
 
     # After we inserted all the modules, insert dependencies between
     # releases and modules.
-    seek $pkgsfh, 0, SEEK_SET or die "seek: $!";
-    { redo until <$pkgsfh> eq "\n" }
     $db->begin;
-    my $count = 0;
-    while (<$pkgsfh>) {
-        chomp;
-        my (undef, undef, $relpath) = split;
-        MetaDeps::insertdeps($db, $metadir, $relpath);
-        # commit every 500 packages
-        if (++$count % 500 == 0) { $db->commit; $db->begin }
-    }
-
-    $db->index;
+    _popdeps($pkgsfh, $metadir, $db, \%blacklist);
+    $db->index; # done before commit!
     $db->commit;
 
     close $pkgsfh;
