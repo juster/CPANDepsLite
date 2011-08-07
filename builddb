@@ -17,31 +17,36 @@ sub init
 {
     my ($self, $dbh) = @_;
 
+    $self->{'dbh'} = $dbh;
+
     $dbh->{'AutoCommit'} = 0;
     $dbh->{'RaiseError'} = 1;
     $dbh->{'PrintError'} = 0;
 
-    my %sql = ('author' => q{INSERT INTO author (author_id, name)
-                             VALUES (?,?)},
-               'dist' => q{INSERT INTO dist (dist_id, name)
-                           VALUES (?,?)},
-               'rel' => q{INSERT INTO rel
-                          (rel_id, dist_id, author_id, version)
-                          VALUES (?,?,?,?)},
-               'rel_mod' => q{INSERT INTO rel_mod
-                              (rel_mod_id, version, mod_id, rel_id)
-                              VALUES (?,?,?,?)},
-               'mod' => q{INSERT INTO mod (mod_id, name) VALUES (?,?)});
+    my %tbls = ('author'  => [ qw/author_id name/ ],
+                'dist'    => [ qw/dist_id name/ ],
+                'rel'     => [ qw/rel_id dist_id author_id version/ ],
+                'rel_mod' => [ qw/rel_mod_id version mod_id rel_id/ ],
+                'mod'     => [ qw/mod_id name/ ]);
+    while (my ($tbl, $cols) = each %tbls) {
+        $self->_prepins($tbl, @$cols);
+    }
 
-    my $reqsql = q{INSERT INTO %s (rel_id, mod_id, version) VALUES (?,?,?)};
-    $sql{$_} = sprintf $reqsql, $_ for qw/run_req test_req build_req cfg_req/;
+    # requirement tables all have the same columns
+    $self->_prepins("${_}_req", qw/rel_id mod_id version/)
+        for qw/run test build cfg/;
 
-    my %ins;
-    $ins{$_} = $dbh->prepare($sql{$_}) for keys %sql;
-    $self->{'ins'} = \%ins;
-
-    $self->{'dbh'} = $dbh;
     return $self;
+}
+
+sub _prepins
+{
+    my ($self, $tbl, @cols) = @_;
+    my $binds = join q{,}, (q{?}) x @cols;
+    my $cols = join q{,}, @cols;
+    my $sql = "INSERT INTO $tbl ($cols) VALUES ($binds)";
+    $self->{'ins'}{$tbl} = $self->{'dbh'}->prepare($sql)
+        or die qq{failed to prepare "$sql" for the "$tbl" table};
 }
 
 sub _ins
@@ -49,7 +54,6 @@ sub _ins
     my ($self, $tbl, @cols) = @_;
     $self->{'ins'}{$tbl}->execute(@cols);
 }
-
 
 my $_lastauth = 0;
 sub insauthor
