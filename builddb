@@ -1,0 +1,349 @@
+#!/usr/bin/perl
+
+package MetaDeps::DB;
+
+use strictures 1;
+use Memoize qw(memoize);
+use Carp qw(croak carp confess);
+
+sub new
+{
+    my $class = shift;
+    my $self = bless {}, $class;
+    return $self->init(@_);
+}
+
+sub init
+{
+    my ($self, $dbh) = @_;
+
+    $dbh->{'AutoCommit'} = 0;
+    $dbh->{'RaiseError'} = 1;
+    $dbh->{'PrintError'} = 0;
+
+    my %sql = ('author' => q{INSERT INTO author (author_id, name)
+                             VALUES (?,?)},
+               'dist' => q{INSERT INTO dist (dist_id, name)
+                           VALUES (?,?)},
+               'rel' => q{INSERT INTO rel
+                          (rel_id, dist_id, author_id, version)
+                          VALUES (?,?,?,?)},
+               'rel_mod' => q{INSERT INTO rel_mod
+                              (rel_mod_id, version, mod_id, rel_id)
+                              VALUES (?,?,?,?)},
+               'mod' => q{INSERT INTO mod (mod_id, name) VALUES (?,?)});
+
+    my $reqsql = q{INSERT INTO %s (rel_id, mod_id, version) VALUES (?,?,?)};
+    $sql{$_} = sprintf $reqsql, $_ for qw/run_req test_req build_req cfg_req/;
+
+    my %ins;
+    $ins{$_} = $dbh->prepare($sql{$_}) for keys %sql;
+    $self->{'ins'} = \%ins;
+
+    $self->{'sel'}{'mod'} = $dbh->prepare(<<'END_SQL');
+SELECT m.mod_id FROM mod AS m WHERE m.name = ?
+END_SQL
+
+    $self->{'dbh'} = $dbh;
+    return $self;
+}
+
+sub _ins
+{
+    my ($self, $tbl, @cols) = @_;
+    $self->{'ins'}{$tbl}->execute(@cols);
+}
+
+
+sub _sel
+{
+    my ($self, $tbl, @cols) = @_;
+    $self->{'sel'}{$tbl}->execute(@cols) or return undef;
+    return $self->{'sel'}{$tbl}->fetchrow_arrayref;
+}
+
+my $_lastauth = 0;
+sub insauthor
+{
+    my ($self, $name) = @_;
+    $self->_ins('author', ++$_lastauth, $name);
+    return $_lastauth;
+}
+memoize('insauthor');
+
+my $_lastdist = 0;
+sub insdist
+{
+    my ($self, $name) = @_;
+    $self->_ins('dist', ++$_lastdist, $name);
+    return $_lastdist;
+}
+memoize('insdist');
+
+my $_lastrel = 0;
+sub insrel
+{
+    my ($self, $rel) = @_;
+    my $distid = $self->insdist($rel->{'distname'});
+    my $authid = $self->insauthor($rel->{'author'});
+    $self->_ins('rel', ++$_lastrel, $distid, $authid, $rel->{'version'});
+    return $_lastrel;
+}
+memoize('insrel');
+
+my $_lastmod = 0;
+sub insmod
+{
+    my ($self, $name) = @_;
+    $self->_ins('mod', ++$_lastmod, $name);
+    return $_lastmod;
+}
+memoize('insmod');
+
+my $_lastrelmod = 0;
+sub insrelmod
+{
+    my ($self, $relid, $mod, $ver) = @_;
+
+    undef $ver if $ver eq 'undef';
+    my $modid = $self->insmod($mod);
+    $self->_ins('rel_mod', ++$_lastrelmod, $ver, $modid, $relid);
+    return $_lastrelmod;
+}
+
+# create a fake module called "perl" for each perl release.
+sub fakeperlmods
+{
+    my ($self) = @_;
+
+    my $dbh = $self->{'dbh'};
+    my $perls = $dbh->selectall_arrayref(<<'ENDSQL');
+SELECT r.rel_id, r.version
+FROM rel AS r
+JOIN dist AS d ON (d.dist_id = r.dist_id)
+WHERE d.name = "perl"
+ENDSQL
+
+    confess 'failed to find any perl releases' unless @$perls;
+
+    $dbh->do(<<'ENDSQL', {}, ++$_lastmod, 'perl');
+INSERT INTO mod (mod_id, name) VALUES (?,?)
+ENDSQL
+
+    for my $row (@$perls) {
+        my ($relid, $ver) = @$row;
+        $dbh->do(<<'ENDSQL', {}, ++$_lastrelmod, $ver, ++$_lastmod, $relid);
+INSERT INTO rel_mod (rel_mod_id, version, mod_id, rel_id) VALUES (?,?,?,?)
+ENDSQL
+    }
+
+    return;
+}
+
+sub begin
+{
+    my ($self) = @_;
+    $self->{'dbh'}->do('BEGIN TRANSACTION');
+}
+
+sub commit
+{
+    my ($self) = @_;
+    $self->{'dbh'}->do('COMMIT');
+}
+
+1; # end of MetaDeps::DB
+
+#-----------------------------------------------------------------------------
+
+package MetaDeps;
+
+use strictures 1;
+use CPAN::Meta qw();
+use File::Find qw(find);
+use YAML::XS qw();
+use JSON::XS qw();
+use Carp qw(croak);
+use DBI;
+
+my %ModId;
+
+sub _splitrel
+{
+    my ($path) = @_;
+
+    $path =~ s/[.](?:tar[.].*?|zip|tgz)\z//;
+
+    # Some "paths" have five components.
+    my @c = split m{/}, $path;
+    my ($author, $file) = splice @c, -2; # last two are the author & filename
+    @c = split /-/, $file;
+    my $ver  = pop @c; # the version is the last "-" chunk
+    my $dist = join '-', @c;
+
+    return { 'author'   => $author,
+             'distname' => $dist,
+             'version'  => $ver,
+             'metapath' => $path };
+}
+
+sub initdb
+{
+    my ($dbpath, $sqlpath) = @_;
+    die "$sqlpath is missing" unless -f $sqlpath;
+
+    open my $schema, '<', $sqlpath or die "error: open $sqlpath: $!";
+    open my $sqlite, "|sqlite3 $dbpath" or die "error: sqlite3 pipe: $!";
+    print $sqlite $_ while <$schema>;
+    close $schema;
+    close $sqlite or die "error: closing sqlite3: $!";
+
+    die "error: sqlite3 returned code $?" unless $? == 0;
+}
+
+# CPAN::Meta::Converter gives up too easily...
+sub _meta_prereqs
+{
+    my ($meta) = @_;
+    return $meta->{'prereqs'} if exists $meta->{'prereqs'};
+
+    my $prereqs;
+    $prereqs->{'configure'}{'requires'} = $meta->{'configure_requires'};
+    $prereqs->{'build'}{'requires'} = $meta->{'build_requires'};
+    $prereqs->{'runtime'}{'requires'} = $meta->{'requires'};
+
+    return $prereqs
+}
+
+sub _decode_meta
+{
+    my ($mpath) = @_;
+
+    # Parse::CPAN::{JSON,YAML} sucks hard...
+    my @types = ('json', \&JSON::XS::decode_json, 'yml', \&YAML::XS::Load);
+    while (my ($ext, $decoder) = splice @types, 0, 2) {
+        my $path = "$mpath.$ext";
+        next unless -f $path;
+
+        open my $metafh, '<', $path or die "open: $!";
+        my $metatxt = do { local $/; <$metafh> };
+        close $metafh;
+
+        my $meta = eval { $decoder->($metatxt) };
+        if ($@) {
+            print STDERR "error: bad meta file: $path\n$@";
+            return undef;
+        }
+        return $meta;
+    }
+
+    return undef;
+}
+
+# transfer dists/modules from 02packages.details.txt to the db.
+sub insertpkg
+{
+    my ($db, $mod, $ver, $path) = @_;
+
+    my $rel   = _splitrel($path);
+    my $relid = $db->insrel($rel);
+    $db->insrelmod($relid, $mod, $ver);
+
+    return;
+}
+
+my %seen;
+my %lastreqs = map { ("${_}_req" => 0) } qw/run test build cfg/;
+sub insertdeps
+{
+    my ($db, $metadir, $relpath) = @_;
+
+    return if $seen{$relpath}++;
+
+    my $rel = _splitrel($relpath);
+    my $cpath = $rel->{'metapath'};
+    my $meta = _decode_meta("$metadir/$cpath") or return undef;
+    my $prereqs = _meta_prereqs($meta);
+
+    my %namemap = ('run_req'   => 'runtime',
+                   'test_req'  => 'test',
+                   'build_req' => 'build',
+                   'cfg_req'   => 'configure');
+
+    ENTRY_LOOP:
+    while (my ($tbl, $key) = each %namemap) {
+        my $reqs = eval { $prereqs->{$key}{'requires'} };
+        next ENTRY_LOOP unless ref $reqs eq 'HASH';
+
+        REQ_LOOP:
+        while (my ($mod, $ver) = each %$reqs) {
+            my $modid = $db->insmod($mod);
+            my $id = ++$lastreqs{$tbl};
+            undef $ver if !$ver || $ver eq '0';
+            $db->_ins($tbl, $id, $modid, $ver);
+        }
+    }
+}
+
+1; # end of MetaDeps
+
+#-----------------------------------------------------------------------------
+
+package main;
+
+use strictures 1;
+use Fcntl qw(SEEK_SET);
+
+my $SCHEMAFILE = 'metadeps.sql';
+
+sub createdb
+{
+    my ($pkgspath, $metadir, $destpath) = @_;
+
+    # make sure files exist before we delete old db file.
+    die "error: $pkgspath file is missing" unless -f $pkgspath;
+    die "error: $metadir dir is missing" unless -d $metadir;
+
+    if (-f $destpath) {
+        print STDERR "warning: deleting old $destpath db file\n";
+        unlink $destpath or die "unlink $destpath: $!";
+    }
+    MetaDeps::initdb($destpath, $SCHEMAFILE);
+
+    my $dbh = DBI->connect("dbi:SQLite:$destpath")
+        or die "error: $DBI::errstr";
+    my $db = MetaDeps::DB->new($dbh);
+
+    open my $pkgsfh, '<', $pkgspath or die "open: $!";
+    { redo until <$pkgsfh> eq "\n" }
+    $db->begin;
+    while (<$pkgsfh>) {
+        chomp;
+        my ($mod, $ver, $relpath) = split;
+        MetaDeps::insertpkg($db, $mod, $ver, $relpath);
+    }
+
+    # Create fake perl modules for each perl release.
+    $db->fakeperlmods;
+    $db->commit;
+
+    # After we inserted all the modules, insert dependencies between
+    # releases and modules.
+    seek $pkgsfh, 0, SEEK_SET or die "seek: $!";
+    { redo until <$pkgsfh> eq "\n" }
+    $db->begin;
+    my $count = 0;
+    while (<$pkgsfh>) {
+        chomp;
+        my (undef, undef, $relpath) = split;
+        MetaDeps::insertdeps($db, $metadir, $relpath);
+        if (++$count % 500 == 0) { $db->commit; $db->begin }
+    }
+    $db->commit;
+
+    close $pkgsfh;
+    $dbh->disconnect;
+    return;
+}
+
+createdb('02packages.details.txt', 'metas', 'metadeps.db');

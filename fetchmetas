@@ -1,0 +1,113 @@
+#!/usr/bin/perl
+
+package FetchMetas;
+
+use strictures 1;
+
+use File::Basename qw(basename fileparse);
+use File::Path     qw(mkpath rmtree);
+use File::Find     qw(find);
+use LWP::UserAgent qw();
+use Exporter       qw(import);
+use Fcntl          qw(SEEK_END);
+use IO::Handle;
+
+our $VERSION = '0.01';
+our @EXPORT = qw(fetchmetas);
+
+my $SRCURL = "http://cpansearch.perl.org/src";
+my $MISSFILE = '00MISSING';
+
+sub _metaurl
+{
+    my ($cpath) = @_;
+    $cpath =~ s{\A[A-Z]/[A-Z]{2}/}{} or die "invalid CPAN path: $cpath";
+    return "$SRCURL/$cpath/META"
+}
+
+sub _donedists
+{
+    my ($metadir) = @_;
+
+    # load a list of the .yml/.json files we have already
+    my %havemeta;
+    find(sub {
+             $havemeta{$_} = 1 if s/[.]yml\z|[.]json\z//;
+         }, $metadir);
+
+    # keep track of dists that did not have meta files last time
+    if (-f "$metadir/$MISSFILE") {
+        open my $emptyfh, "<$metadir/$MISSFILE" or die "open: $!";
+        while (<$emptyfh>) { chomp; $havemeta{$_} = 1; }
+        close $emptyfh;
+    }
+
+    return \%havemeta;
+}
+
+sub fetchmetas
+{
+    my ($dest) = @_;
+
+    my $donedist = _donedists($dest);
+    open my $missfh, ">>$dest/$MISSFILE" or die "open: $!";
+    seek $missfh, 0, SEEK_END or die "seek: $!";
+
+    # Make sure we do not lose any data if we press control-C.
+    local $SIG{'INT'} = sub {
+        print "\nInterrupted...\n";
+        close $missfh;
+        exit 1;
+    };
+
+    open my $pkgfh, '<02packages.details.txt'
+        or die "(extract 02packages.details.txt to current dir)\n"
+            . "open: $!";
+    { redo unless <$pkgfh> eq qq{\n} } # skip past empty line
+
+    my $ua = LWP::UserAgent->new('agent' => "FetchMetas/$VERSION");
+    chdir $dest or die "chdir: $!";
+DIST_LOOP:
+    while (<$pkgfh>) {
+        chomp;
+        my $cpath = (split)[2];
+        $cpath =~ s/[.]tar.*?\z//;
+        $cpath =~ s{\A/}{};
+
+        my (undef, $authdir) = fileparse($cpath);
+        unless (-d $authdir) { mkpath($authdir) or die "mkpath: $!"; }
+
+        my $dist = $cpath;
+        $dist =~ s{\A.*[/]}{};
+        next if $donedist->{$dist};
+        $donedist->{$dist} = 1;
+
+        # Try fetching the META.yml or the META.json file if that fails.
+        my $urlbase = _metaurl($cpath);
+        my @fetches = map { ("$cpath.$_", "$urlbase.$_") } qw/yml json/;
+
+        while (my ($local, $url) = splice @fetches, 0, 2) {
+            my $resp = $ua->get($url, ':content_file' => $local);
+            next DIST_LOOP if $resp->is_success;
+            unless ($resp->code == 404) {
+                print STDERR "error: $url says @{[$resp->status_line]}\n";
+                exit 1;
+            }
+        }
+
+        print STDERR "$dist does not appear to have a meta file.\n";
+        print $missfh $dist, "\n";
+    }
+
+    close $pkgfh;
+    close $missfh;
+    return;
+}
+
+package main;
+
+use strictures 1;
+
+mkdir 'metas' or die "mkdir: $!" unless -d 'metas';
+FetchMetas->import();
+fetchmetas('metas');
