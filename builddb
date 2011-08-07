@@ -74,15 +74,17 @@ sub insdist
 memoize('insdist');
 
 my $_lastrel = 0;
+my %_relmemo;
 sub insrel
 {
     my ($self, $rel) = @_;
+    return $_relmemo{$rel->{'metapath'}}
+        if $_relmemo{$rel->{'metapath'}};
     my $distid = $self->insdist($rel->{'distname'});
     my $authid = $self->insauthor($rel->{'author'});
     $self->_ins('rel', ++$_lastrel, $distid, $authid, $rel->{'version'});
-    return $_lastrel;
+    return $_relmemo{$rel->{'metapath'}} = $_lastrel;
 }
-memoize('insrel');
 
 my $_lastmod = 0;
 sub insmod
