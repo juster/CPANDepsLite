@@ -15,8 +15,9 @@ sub new
 
 sub init
 {
-    my ($self, $dbh) = @_;
+    my ($self, $dbpath) = @_;
 
+    my $dbh = DBI->connect("dbi:SQLite:$dbpath") or die "error: $DBI::errstr";
     $self->{'dbh'} = $dbh;
 
     $dbh->{'AutoCommit'} = 0;
@@ -159,6 +160,11 @@ sub index
     return;
 }
 
+sub disconnect
+{
+    shift->{'dbh'}->disconnect;
+}
+
 1; # end of MetaDeps::DB
 
 #-----------------------------------------------------------------------------
@@ -199,6 +205,7 @@ sub _splitrel
              'metapath' => $path };
 }
 
+# TODO: move to MetaDeps::DB?
 sub initdb
 {
     my ($dbpath, $sqlpath) = @_;
@@ -366,9 +373,7 @@ sub createdb
     }
     MetaDeps::initdb($destpath, $SCHEMAFILE);
 
-    my $dbh = DBI->connect("dbi:SQLite:$destpath")
-        or die "error: $DBI::errstr";
-    my $db = MetaDeps::DB->new($dbh);
+    my $db = MetaDeps::DB->new($destpath);
     $db->begin;
 
     my %blacklist;
@@ -385,9 +390,9 @@ sub createdb
     _popdeps($pkgsfh, $metadir, $db, \%blacklist);
     $db->index; # done before commit!
     $db->commit;
+    $db->disconnect;
 
     close $pkgsfh;
-    $dbh->disconnect;
     return;
 }
 
