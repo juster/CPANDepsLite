@@ -145,6 +145,18 @@ sub commit
     $self->{'dbh'}->do('COMMIT');
 }
 
+sub index
+{
+    my ($self) = @_;
+    my $dbh = $self->{'dbh'};
+
+    $dbh->do('CREATE INDEX dist_index ON dist (name)');
+    $dbh->do('CREATE INDEX mod_index ON mod (name)');
+    $dbh->do('CREATE INDEX author_index ON author (name)');
+
+    return;
+}
+
 1; # end of MetaDeps::DB
 
 #-----------------------------------------------------------------------------
@@ -330,8 +342,11 @@ sub createdb
         chomp;
         my (undef, undef, $relpath) = split;
         MetaDeps::insertdeps($db, $metadir, $relpath);
+        # commit every 500 packages
         if (++$count % 500 == 0) { $db->commit; $db->begin }
     }
+
+    $db->index;
     $db->commit;
 
     close $pkgsfh;
