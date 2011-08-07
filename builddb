@@ -273,7 +273,7 @@ sub insertpkg
     return 1;
 }
 
-my %lastreqs = map { ("${_}_req" => 0) } qw/run test build cfg/;
+my %lastreqs;
 sub insertdeps
 {
     my ($db, $metadir, $relpath) = @_;
@@ -296,9 +296,9 @@ sub insertdeps
         REQ_LOOP:
         while (my ($mod, $ver) = each %$reqs) {
             my $modid = $db->insmod($mod);
-            my $id = ++$lastreqs{$tbl};
+            my $relid = $db->insrel($rel);
             undef $ver if !$ver || $ver eq '0';
-            $db->_ins($tbl, $id, $modid, $ver);
+            $db->_ins($tbl, $relid, $modid, $ver);
         }
     }
 }

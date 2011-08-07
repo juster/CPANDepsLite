@@ -28,27 +28,28 @@ CREATE TABLE mod (
 );
 
 -- Runtime, build, and configure requirements of releases.
+-- Releases (rel_id) depend on versions (version) of modules (mod_id).
 
 CREATE TABLE run_req (
-    rel_id INTEGER PRIMARY KEY,
+    rel_id INTEGER,
     mod_id INTEGER,
     version TEXT
 );
 
 CREATE TABLE test_req (
-    rel_id INTEGER PRIMARY KEY,
+    rel_id INTEGER,
     mod_id INTEGER,
     version TEXT
 );
 
 CREATE TABLE build_req (
-    rel_id INTEGER PRIMARY KEY,
+    rel_id INTEGER,
     mod_id INTEGER,
     version TEXT
 );
 
 CREATE TABLE cfg_req (
-    rel_id INTEGER PRIMARY KEY,
+    rel_id INTEGER,
     mod_id INTEGER,
     version TEXT
 );
