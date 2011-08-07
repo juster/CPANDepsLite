@@ -53,7 +53,8 @@ sub _prepins
 sub _ins
 {
     my ($self, $tbl, @cols) = @_;
-    $self->{'ins'}{$tbl}->execute(@cols);
+    eval { $self->{'ins'}{$tbl}->execute(@cols) }
+        or croak "insert in $tbl: $@";
 }
 
 my $_lastauth = 0;
