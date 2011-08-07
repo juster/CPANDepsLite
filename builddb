@@ -40,10 +40,6 @@ sub init
     $ins{$_} = $dbh->prepare($sql{$_}) for keys %sql;
     $self->{'ins'} = \%ins;
 
-    $self->{'sel'}{'mod'} = $dbh->prepare(<<'END_SQL');
-SELECT m.mod_id FROM mod AS m WHERE m.name = ?
-END_SQL
-
     $self->{'dbh'} = $dbh;
     return $self;
 }
@@ -54,13 +50,6 @@ sub _ins
     $self->{'ins'}{$tbl}->execute(@cols);
 }
 
-
-sub _sel
-{
-    my ($self, $tbl, @cols) = @_;
-    $self->{'sel'}{$tbl}->execute(@cols) or return undef;
-    return $self->{'sel'}{$tbl}->fetchrow_arrayref;
-}
 
 my $_lastauth = 0;
 sub insauthor
