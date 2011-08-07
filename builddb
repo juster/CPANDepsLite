@@ -186,6 +186,11 @@ sub _splitrel
     my $ver  = pop @c; # the version is the last "-" chunk
     my $dist = join '-', @c;
 
+    unless ($dist) {
+        print STDERR "warning: ignoring badly named $path\n";
+        return undef;
+    }
+
     return { 'author'   => $author,
              'distname' => $dist,
              'version'  => $ver,
@@ -250,7 +255,7 @@ sub insertpkg
 {
     my ($db, $mod, $ver, $path) = @_;
 
-    my $rel   = _splitrel($path);
+    my $rel   = _splitrel($path) or return;
     my $relid = $db->insrel($rel);
     $db->insrelmod($relid, $mod, $ver);
 
@@ -265,9 +270,9 @@ sub insertdeps
 
     return if $seen{$relpath}++;
 
-    my $rel = _splitrel($relpath);
+    my $rel = _splitrel($relpath) or return;
     my $cpath = $rel->{'metapath'};
-    my $meta = _decode_meta("$metadir/$cpath") or return undef;
+    my $meta = _decode_meta("$metadir/$cpath") or return;
     my $prereqs = _meta_prereqs($meta);
 
     my %namemap = ('run_req'   => 'runtime',
