@@ -1,0 +1,65 @@
+#!/usr/bin/perl
+
+use strictures 1;
+
+use List::Util qw(sum);
+use DBI;
+
+my @REQTYPES = qw/run cfg build test/;
+
+sub reqsql
+{
+    my ($type) = @_;
+    return <<"END_SQL"
+SELECT ${type}dep_dist.name, ${type}dep_rel.version
+FROM dist AS req_dist
+----------------------------------------------------------------------
+-- Join from the dist to the modules that it has released.
+----
+JOIN rel AS req_rel
+  ON (req_rel.dist_id = req_dist.dist_id)
+JOIN rel_mod AS req_relmod
+  ON (req_relmod.rel_id = req_rel.rel_id)
+JOIN mod AS req_mod
+  ON (req_mod.mod_id = req_relmod.mod_id)
+----------------------------------------------------------------------
+-- Backtrack to the dists that depend on those modules.
+----
+JOIN ${type}_req
+  ON (${type}_req.mod_id = req_mod.mod_id)
+JOIN mod AS ${type}dep_mod
+  ON (${type}dep_mod.mod_id = ${type}_req.mod_id)
+JOIN rel AS ${type}dep_rel
+  ON (${type}dep_rel.rel_id = ${type}_req.rel_id)
+JOIN dist AS ${type}dep_dist
+  ON (${type}dep_dist.dist_id = ${type}dep_rel.dist_id)
+-- ----------------------------------------------------------------------
+WHERE req_dist.name = ?
+END_SQL
+}
+
+my $dbh = DBI->connect('dbi:SQLite:metadeps.db') or die $DBI::errstr;
+
+$| = 1;
+while (<>) {
+    chomp; my ($dist) = split;
+    my @revdeps;
+    for (@REQTYPES) {
+        my $sql = reqsql($_);
+        my $reqs = $dbh->selectall_arrayref($sql, undef, $dist);
+        push @revdeps, @$reqs if $reqs;
+    }
+
+    my %seen;
+    print $dist, "\n";
+    @revdeps = sort { $a->[0] cmp $b->[0] } @revdeps;
+    for (@revdeps) {
+        my ($dist, $ver) = @$_;
+        next if $seen{$dist}++;
+        $ver = 'undef' unless defined $ver;
+        print "$dist $ver\n";
+    }
+    print "\n";
+}
+
+$dbh->disconnect;
