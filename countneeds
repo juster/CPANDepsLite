@@ -11,11 +11,12 @@ sub reqsql
 {
     my ($type) = @_;
     return <<"END_SQL"
-SELECT ${type}dep_dist.name, ${type}dep_rel.version
+SELECT dep_dist.name, dep_rel.version
 FROM dist AS req_dist
 ----------------------------------------------------------------------
 -- Join from the dist to the modules that it has released.
-----
+-- (req = requirement)
+----------------------------------------------------------------------
 JOIN rel AS req_rel
   ON (req_rel.dist_id = req_dist.dist_id)
 JOIN rel_mod AS req_relmod
@@ -24,16 +25,15 @@ JOIN mod AS req_mod
   ON (req_mod.mod_id = req_relmod.mod_id)
 ----------------------------------------------------------------------
 -- Backtrack to the dists that depend on those modules.
-----
-JOIN ${type}_req
-  ON (${type}_req.mod_id = req_mod.mod_id)
-JOIN mod AS ${type}dep_mod
-  ON (${type}dep_mod.mod_id = ${type}_req.mod_id)
-JOIN rel AS ${type}dep_rel
-  ON (${type}dep_rel.rel_id = ${type}_req.rel_id)
-JOIN dist AS ${type}dep_dist
-  ON (${type}dep_dist.dist_id = ${type}dep_rel.dist_id)
--- ----------------------------------------------------------------------
+-- (dep = dependant)
+----------------------------------------------------------------------
+JOIN ${type}_req AS req
+  ON (req.mod_id = req_mod.mod_id)
+JOIN rel AS dep_rel
+  ON (dep_rel.rel_id = req.rel_id)
+JOIN dist AS dep_dist
+  ON (dep_dist.dist_id = dep_rel.dist_id)
+----------------------------------------------------------------------
 WHERE req_dist.name = ?
 END_SQL
 }
