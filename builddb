@@ -200,6 +200,9 @@ sub _splitrel
         return undef;
     }
 
+    # CGI for example is CGI.pm-3.55 \o/
+    $dist =~ s/[.]pm\z//;
+
     return { 'author'   => $author,
              'distname' => $dist,
              'version'  => $ver,
