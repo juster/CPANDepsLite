@@ -180,8 +180,6 @@ use JSON::XS qw();
 use Carp qw(croak);
 use DBI;
 
-my %ModId;
-
 sub _splitrel
 {
     my ($path) = @_;
@@ -277,7 +275,6 @@ sub insertpkg
     return 1;
 }
 
-my %lastreqs;
 sub insertdeps
 {
     my ($db, $metadir, $relpath) = @_;
