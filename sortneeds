@@ -12,8 +12,7 @@ END {
             }
         }
 
-        print data[lowdist] "\n"
         delete counts[lowdist]
-        delete data[lowdist]
+        print data[lowdist] "\n"
     }
 }
