@@ -6,11 +6,14 @@ use strictures 1;
 use Memoize qw(memoize);
 use Carp qw(croak carp confess);
 
+use DBD::SQLite;
+use DBI;
+
 sub new
 {
     my $class = shift;
     my $self = bless {}, $class;
-    return $self->init(@_);
+    $self->init(@_);
 }
 
 sub init
@@ -24,6 +27,35 @@ sub init
     $dbh->{'RaiseError'} = 1;
     $dbh->{'PrintError'} = 0;
 
+    $dbh->sqlite_create_collation
+        ('perlver', sub { version->parse($a) cmp version->parse($b); });
+
+    return $self;
+}
+
+sub create
+{
+    my ($self, $sqlpath) = @_;
+    die "$sqlpath is missing" unless -f $sqlpath;
+
+    my $stmt;
+    open my $schema, '<', $sqlpath or die "error: open $sqlpath: $!";
+    while (<$schema>) {
+        $stmt .= $_;
+        if (/;\s*$/) {
+            $self->{'dbh'}->do($stmt) or die "error: $DBI::errstr";
+            $stmt = q{};
+        }
+    }
+    my $sqltxt = join q{}, <$schema>;
+    close $schema;
+
+    return;
+}
+
+sub prepare
+{
+    my ($self) = @_;
     my %tbls = ('author'  => [ qw/author_id name/ ],
                 'dist'    => [ qw/dist_id name/ ],
                 'rel'     => [ qw/rel_id dist_id author_id version/ ],
@@ -37,7 +69,7 @@ sub init
     $self->_prepins("${_}_req", qw/rel_id mod_id version/)
         for qw/run test build cfg/;
 
-    return $self;
+    return;
 }
 
 sub _prepins
@@ -178,7 +210,6 @@ use File::Find qw(find);
 use YAML::XS qw();
 use JSON::XS qw();
 use Carp qw(croak);
-use DBI;
 
 sub _splitrel
 {
@@ -205,21 +236,6 @@ sub _splitrel
              'distname' => $dist,
              'version'  => $ver,
              'metapath' => $path };
-}
-
-# TODO: move to MetaDeps::DB?
-sub initdb
-{
-    my ($dbpath, $sqlpath) = @_;
-    die "$sqlpath is missing" unless -f $sqlpath;
-
-    open my $schema, '<', $sqlpath or die "error: open $sqlpath: $!";
-    open my $sqlite, "|sqlite3 $dbpath" or die "error: sqlite3 pipe: $!";
-    print $sqlite $_ while <$schema>;
-    close $schema;
-    close $sqlite or die "error: closing sqlite3: $!";
-
-    die "error: sqlite3 returned code $?" unless $? == 0;
 }
 
 # CPAN::Meta::Converter gives up too easily...
@@ -372,10 +388,9 @@ sub createdb
         print STDERR "warning: deleting old $destpath db file\n";
         unlink $destpath or die "unlink $destpath: $!";
     }
-    MetaDeps::initdb($destpath, $SCHEMAFILE);
 
     my $db = MetaDeps::DB->new($destpath);
-    $db->begin;
+    $db->create($SCHEMAFILE); $db->commit; $db->prepare; $db->begin;
 
     my %blacklist;
     open my $pkgsfh, '<', $pkgspath or die "open: $!";

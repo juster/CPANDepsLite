@@ -12,12 +12,12 @@ CREATE TABLE rel (
     rel_id INTEGER PRIMARY KEY,
     dist_id INTEGER,
     author_id INTEGER,
-    version TEXT
+    version TEXT COLLATE perlver
 );
 
 CREATE TABLE rel_mod (
     rel_mod_id INTEGER PRIMARY KEY,
-    version TEXT,
+    version TEXT COLLATE perlver,
     mod_id INTEGER,
     rel_id INTEGER
 );
@@ -33,23 +33,23 @@ CREATE TABLE mod (
 CREATE TABLE run_req (
     rel_id INTEGER,
     mod_id INTEGER,
-    version TEXT
+    version TEXT COLLATE perlver
 );
 
 CREATE TABLE test_req (
     rel_id INTEGER,
     mod_id INTEGER,
-    version TEXT
+    version TEXT COLLATE perlver
 );
 
 CREATE TABLE build_req (
     rel_id INTEGER,
     mod_id INTEGER,
-    version TEXT
+    version TEXT COLLATE perlver
 );
 
 CREATE TABLE cfg_req (
     rel_id INTEGER,
     mod_id INTEGER,
-    version TEXT
+    version TEXT COLLATE perlver
 );
