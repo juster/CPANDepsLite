@@ -1,0 +1,76 @@
+#!/usr/bin/perl
+
+use strictures 1;
+use version;
+use DBI;
+use utf8;
+
+use DBD::SQLite;
+
+my @REQ_TYPES = qw/run test build cfg/;
+my $DBH = DBI->connect('dbi:SQLite:metadeps.db') or die $DBI::errstr;
+$DBH->sqlite_create_collation
+    ('perlver', sub {
+         version->parse($a) cmp version->parse($b);
+     });
+$DBH->{'RaiseError'} = 1;
+$DBH->{'PrintError'} = 0;
+
+sub rels_by_ver
+{
+    my ($lver, $rver) = ($a->[1], $b->[1]);
+    version->parse($lver) <=> version->parse($rver);
+}
+
+sub dist_latest
+{
+    my ($name) = @_;
+    my ($id) = $DBH->selectrow_array(<<'END_SQL', {}, $name);
+SELECT rel.rel_id
+FROM dist
+JOIN rel ON (dist.dist_id = rel.dist_id)
+WHERE dist.name = ? COLLATE NOCASE
+ORDER BY rel.version DESC LIMIT 1
+END_SQL
+
+    die "error: failed to find dist named $name\n" unless $id;
+    return $id;
+}
+
+sub req_sql
+{
+    my ($type) = @_;
+    return <<"END_SQL";
+-- "req" is requirements
+-- "dep" is dependant
+SELECT req_dist.name
+FROM rel AS dep_rel
+JOIN ${type}_req AS req    ON (req.rel_id = dep_rel.rel_id)
+JOIN mod AS req_mod        ON (req_mod.mod_id = req.mod_id)
+JOIN rel_mod AS req_relmod ON (req_relmod.mod_id = req_mod.mod_id)
+JOIN rel AS req_rel        ON (req_rel.rel_id = req_relmod.rel_id)
+JOIN dist AS req_dist      ON (req_dist.dist_id = req_rel.dist_id)
+WHERE dep_rel.rel_id = ?
+GROUP BY req_dist.name
+END_SQL
+}
+
+sub dist_reqs
+{
+    my ($distname) = @_;
+    my $id = dist_latest($distname);
+
+    my @reqs;
+    for my $type (@REQ_TYPES) {
+        my $req_rels = $DBH->selectall_arrayref(req_sql($type), {}, $id);
+        push @reqs, map { @$_ } @$req_rels;
+    }
+
+    my %seen;
+    return sort grep { !$seen{$_}++ } @reqs;
+}
+
+while (my $qdist = shift) {
+    my @reqs = dist_reqs($qdist);
+    print "$qdist @reqs\n";
+}
