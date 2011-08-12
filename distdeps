@@ -6,6 +6,10 @@ use DBI;
 use utf8;
 
 use DBD::SQLite;
+use Getopt::Long;
+
+my $RECURSE;
+GetOptions('r' => \$RECURSE) or exit 1;
 
 my @REQ_TYPES = qw/run test build cfg/;
 my $DBH = DBI->connect('dbi:SQLite:metadeps.db') or die $DBI::errstr;
@@ -70,7 +74,20 @@ sub dist_reqs
     return sort grep { !$seen{$_}++ } @reqs;
 }
 
-while (my $qdist = shift) {
-    my @reqs = dist_reqs($qdist);
-    print "$qdist @reqs\n";
+my %_printed;
+sub print_reqs
+{
+    my ($dist) = @_;
+    my @reqs = dist_reqs($dist);
+    print "$dist @reqs\n";
+
+    if ($RECURSE) {
+        for (@reqs) { print_reqs($_) unless $_printed{$_}++; }
+    }
+
+    return;
+}
+
+while (my $dist = shift) {
+    print_reqs($dist);
 }
