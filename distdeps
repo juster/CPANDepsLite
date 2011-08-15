@@ -15,16 +15,12 @@ my @REQ_TYPES = qw/run test build cfg/;
 my $DBH = DBI->connect('dbi:SQLite:metadeps.db') or die $DBI::errstr;
 $DBH->sqlite_create_collation
     ('perlver', sub {
+         my ($a, $b) = @_;
+         return $a cmp $b if $a !~ /\d/ && $b !~ /\d/;
          version->parse($a) cmp version->parse($b);
      });
 $DBH->{'RaiseError'} = 1;
 $DBH->{'PrintError'} = 0;
-
-sub rels_by_ver
-{
-    my ($lver, $rver) = ($a->[1], $b->[1]);
-    version->parse($lver) <=> version->parse($rver);
-}
 
 sub dist_latest
 {
@@ -38,6 +34,7 @@ ORDER BY rel.version DESC LIMIT 1
 END_SQL
 
     die "error: failed to find dist named $name\n" unless $id;
+    print STDERR "DBG: \$id = $id\n";
     return $id;
 }
 

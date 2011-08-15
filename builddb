@@ -27,8 +27,12 @@ sub init
     $dbh->{'RaiseError'} = 1;
     $dbh->{'PrintError'} = 0;
 
-    $dbh->sqlite_create_collation
-        ('perlver', sub { version->parse($a) cmp version->parse($b); });
+    $DBH->sqlite_create_collation
+        ('perlver', sub {
+             my ($a, $b) = @_;
+             return $a cmp $b if $a !~ /\d/ && $b !~ /\d/;
+             version->parse($a) cmp version->parse($b);
+         });
 
     return $self;
 }
