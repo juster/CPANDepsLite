@@ -34,7 +34,6 @@ ORDER BY rel.version DESC LIMIT 1
 END_SQL
 
     die "error: failed to find dist named $name\n" unless $id;
-    print STDERR "DBG: \$id = $id\n";
     return $id;
 }
 
