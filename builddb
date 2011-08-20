@@ -27,7 +27,7 @@ sub init
     $dbh->{'RaiseError'} = 1;
     $dbh->{'PrintError'} = 0;
 
-    $DBH->sqlite_create_collation
+    $dbh->sqlite_create_collation
         ('perlver', sub {
              my ($a, $b) = @_;
              return $a cmp $b if $a !~ /\d/ && $b !~ /\d/;
