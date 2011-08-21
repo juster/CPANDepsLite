@@ -1,10 +1,10 @@
 #!/usr/bin/awk -f
 
 BEGIN { FS = "\n"; RS = "" }
-NF < 20 { counts[$1] = NF; data[$1] = $0 }
+NF > 10 { counts[$1] = NF; data[$1] = $0 }
 END {
     while (length(counts) > 0) {
-        lowcount = 1000000
+        lowcount = "1E6"
         for (dist in counts) {
             if (counts[dist] < lowcount) {
                 lowcount = counts[dist]
