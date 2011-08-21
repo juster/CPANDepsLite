@@ -226,8 +226,14 @@ sub _splitrel
     my ($author, $file) = splice @c, -2; # last two are the author & filename
     @c = split /-/, $file;
     my $ver  = pop @c; # the version is the last "-" chunk
-    my $dist = join '-', @c;
 
+    # Tk-GraphMan has no version !
+    if ($ver !~ /\d/) {
+        warn "warning: ignoring missing version: $path\n";
+        return undef;
+    }
+
+    my $dist = join '-', @c;
     unless ($dist) {
         print STDERR "warning: ignoring badly named $path\n";
         return undef;
