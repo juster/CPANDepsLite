@@ -1,0 +1,73 @@
+#!/usr/bin/env perl
+
+use strictures 1;
+use DBD::SQLite;
+use DBI;
+
+my $DBH = DBI->connect("dbi:SQLite:metadeps.db",
+                       { 'RaiseError' => 1, 'PrintError' => 0 });
+die "error: $DBI::errstr" unless $DBH;
+
+$DBH->sqlite_create_collation
+    ('perlver', sub {
+         my ($a, $b) = @_;
+         warn "DBG: \$a=$a \$b=$b\n";
+         return $a cmp $b if $a !~ /\d/ && $b !~ /\d/;
+         version->parse($a) cmp version->parse($b);
+     });
+
+my $LATEST = $DBH->prepare(<<'END_SQL');
+SELECT rel.version
+FROM dist
+JOIN rel ON (dist.dist_id = rel.dist_id)
+WHERE dist.name = ? COLLATE NOCASE
+ORDER BY rel.version DESC LIMIT 1
+END_SQL
+
+sub dist_pkgver
+{
+    my ($version) = @_;
+
+    # Package versions should be numbers and decimal points only...
+    $version =~ tr/-/./;
+    $version =~ tr/_0-9.-//cd;
+
+    # Remove developer versions because pacman has no special logic
+    # to compare them to regular versions like perl does.
+    $version =~ s/_[^_]+\z//;
+
+    $version =~ tr/_//d;  # delete other underscores
+    $version =~ tr/././s; # only one period at a time
+    $version =~ s/\A[.]|[.]\z//g; # shouldn't start or stop with a period
+
+    return $version;
+}
+
+sub cpanlatest
+{
+    my ($dist) = @_;
+    warn "DBG: finding dist $dist\n";
+    $LATEST->execute($dist);
+    my ($lastver) = $LATEST->fetchrow_array;
+    return $lastver;
+}
+
+$, = "\t"; $\ = "\n";
+
+while (<>) {
+    my ($pkg, $pkgver, $pkger) = split;
+
+    my $dist = $pkg;
+    $dist =~ s/\Aperl-//;
+    $pkgver =~ s/-[^-]+\z//;
+
+    my $newver = cpanlatest($dist);
+    unless ($newver) {
+        warn "failed to find $pkg dist\n";
+        next;
+    }
+
+    if (dist_pkgver($newver) ne $pkgver) {
+        print $pkg, $pkgver, $newver, $pkger;
+    }
+}
