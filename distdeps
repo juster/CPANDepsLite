@@ -66,7 +66,7 @@ sub dist_reqs
         push @reqs, map { @$_ } @$req_rels;
     }
 
-    my %seen;
+    my %seen = ('perl' => 1); # don't print perl... it's assumed...
     return sort grep { !$seen{$_}++ } @reqs;
 }
 
