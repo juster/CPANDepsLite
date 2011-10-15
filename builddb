@@ -165,7 +165,7 @@ ENDSQL
 
     for my $row (@$perls) {
         my ($relid, $ver) = @$row;
-        $dbh->do(<<'ENDSQL', {}, ++$_lastrelmod, $ver, ++$_lastmod, $relid);
+        $dbh->do(<<'ENDSQL', {}, ++$_lastrelmod, $ver, $_lastmod, $relid);
 INSERT INTO rel_mod (rel_mod_id, version, mod_id, rel_id) VALUES (?,?,?,?)
 ENDSQL
     }
